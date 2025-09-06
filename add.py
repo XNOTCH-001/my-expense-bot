@@ -26,6 +26,7 @@ line_channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
 
 # User ID to push notifications. You must replace this with your actual user ID.
 USER_ID = "YOUR_LINE_USER_ID"  # REMOVE THIS LINE IN THE REAL CODE
+THRESHOLD = 1000  # Set your balance threshold
 
 # Make sure all required variables are set
 if not all([google_credentials_json_str, line_channel_access_token, line_channel_secret]):
@@ -45,6 +46,7 @@ try:
     gc = gspread.service_account_from_dict(google_credentials)
     spreadsheet = gc.open_by_url('YOUR_SPREADSHEET_URL')  # REMOVE THIS LINE IN THE REAL CODE
     sheet = spreadsheet.get_worksheet(0)
+    print("Google Sheets client initialized successfully.")
 except Exception as e:
     print(f"Failed to initialize Google Sheets client: {e}")
     gc = None
@@ -83,10 +85,13 @@ def callback():
     except InvalidSignatureError:
         print("Invalid signature. Check your channel secret.")
         abort(400)
+    except Exception as e:
+        print(f"Error handling webhook: {e}")
+        abort(500)
     return 'OK'
 
 # === Message Handler ===
-@handler.message(TextMessage)
+@handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     """Handles incoming text messages."""
     text = event.message.text.strip()
@@ -110,11 +115,15 @@ def handle_message(event):
             total_expense = 0
             for row in values[1:]:
                 if len(row) >= 3:
-                    amount = float(row[1])
-                    if row[2] == 'รายรับ':
-                        total_income += amount
-                    elif row[2] == 'รายจ่าย':
-                        total_expense += amount
+                    try:
+                        amount = float(row[1])
+                        if row[2] == 'รายรับ':
+                            total_income += amount
+                        elif row[2] == 'รายจ่าย':
+                            total_expense += amount
+                    except (ValueError, IndexError):
+                        # Handle cases where data is not a valid number or not enough columns
+                        continue
 
             balance = total_income - total_expense
             summary = f"สรุปค่าใช้จ่าย:\nรายรับ: {total_income} บาท\nรายจ่าย: {total_expense} บาท\nยอดคงเหลือ: {balance} บาท"
@@ -128,20 +137,83 @@ def handle_message(event):
             print(f"Unexpected error: {e}")
 
     elif text.lower().startswith('รายรับ'):
-        # ... (rest of your existing logic for income)
-        pass # Placeholder for your existing logic
-        
-    elif text.lower().startswith('รายจ่าย'):
-        # ... (rest of your existing logic for expense)
-        pass # Placeholder for your existing logic
+        match = re.search(r'รายรับ\s*(\d+)', text, re.IGNORECASE)
+        if match:
+            amount = float(match.group(1))
+            try:
+                if not sheet:
+                    reply_text(event.reply_token, "ขออภัย, ไม่สามารถเชื่อมต่อกับ Google Sheets ได้.")
+                    return
+
+                new_row = [str(datetime.date.today()), amount, 'รายรับ']
+                sheet.append_row(new_row)
+                replies.append(f"บันทึกรายรับ {amount} บาทเรียบร้อยแล้ว")
+
+                # Check and notify if the balance is below the threshold
+                values = sheet.get_all_values()
+                balance = 0
+                for row in values[1:]:
+                    if len(row) >= 3:
+                        try:
+                            amount = float(row[1])
+                            if row[2] == 'รายรับ':
+                                balance += amount
+                            elif row[2] == 'รายจ่าย':
+                                balance -= amount
+                        except (ValueError, IndexError):
+                            continue
+
+                if balance < THRESHOLD:
+                    push_text(USER_ID, f"⚠️ ยอดคงเหลือต่ำกว่า {THRESHOLD} บาท! ยอดปัจจุบัน: {balance} บาท")
+
+            except Exception as e:
+                replies.append("ขออภัย, เกิดข้อผิดพลาดในการบันทึกข้อมูล.")
+                print(f"Error appending row: {e}")
+        else:
+            replies.append("รูปแบบไม่ถูกต้อง กรุณาใช้: รายรับ จำนวนเงิน")
     
+    elif text.lower().startswith('รายจ่าย'):
+        match = re.search(r'รายจ่าย\s*(\d+)', text, re.IGNORECASE)
+        if match:
+            amount = float(match.group(1))
+            try:
+                if not sheet:
+                    reply_text(event.reply_token, "ขออภัย, ไม่สามารถเชื่อมต่อกับ Google Sheets ได้.")
+                    return
+
+                new_row = [str(datetime.date.today()), amount, 'รายจ่าย']
+                sheet.append_row(new_row)
+                replies.append(f"บันทึกรายจ่าย {amount} บาทเรียบร้อยแล้ว")
+
+                # Check and notify if the balance is below the threshold
+                values = sheet.get_all_values()
+                balance = 0
+                for row in values[1:]:
+                    if len(row) >= 3:
+                        try:
+                            amount = float(row[1])
+                            if row[2] == 'รายรับ':
+                                balance += amount
+                            elif row[2] == 'รายจ่าย':
+                                balance -= amount
+                        except (ValueError, IndexError):
+                            continue
+
+                if balance < THRESHOLD:
+                    push_text(USER_ID, f"⚠️ ยอดคงเหลือต่ำกว่า {THRESHOLD} บาท! ยอดปัจจุบัน: {balance} บาท")
+
+            except Exception as e:
+                replies.append("ขออภัย, เกิดข้อผิดพลาดในการบันทึกข้อมูล.")
+                print(f"Error appending row: {e}")
+        else:
+            replies.append("รูปแบบไม่ถูกต้อง กรุณาใช้: รายจ่าย จำนวนเงิน")
+
     else:
         replies.append("สวัสดีครับ! ผมเป็นบอทสำหรับบันทึกรายรับ-รายจ่ายครับ\n\nตัวอย่างการใช้งาน:\n- รายรับ 500\n- รายจ่าย 150\n- สรุปค่าใช้จ่าย")
     
-    # Send a single reply message to avoid RecursionError
     if replies:
         reply_text(event.reply_token, "\n\n".join(replies))
-        
+
 # The scheduled tasks are not executed in the Gunicorn worker process.
 # We will disable this section as it is not needed for the web service.
 # ======================== RUN SCHEDULE IN BACKGROUND ========================
