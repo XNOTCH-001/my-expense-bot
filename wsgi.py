@@ -1,5 +1,11 @@
-# ไฟล์นี้ทำหน้าที่เป็นจุดเริ่มต้นของแอปพลิเคชันสำหรับ Gunicorn
-# Gunicorn จะเรียกใช้ 'application' ที่ถูกกำหนดไว้ในไฟล์นี้
-import sys
-# แก้ไขจาก 'app' เป็น 'add' เพื่อให้เรียกใช้ไฟล์ add.py
+# This file is used by Gunicorn to find and run your application.
+# It imports the 'app' instance from your main application file.
+
+# We need to import the Flask app instance from your main file.
+# Since your main file is named 'add.py', we import 'app' from 'add'.
 from add import app as application
+
+# The code below is not needed for Gunicorn, but it's good practice
+# for local testing. We will keep it here.
+if __name__ == '__main__':
+    application.run()
