@@ -1,7 +1,5 @@
-# This file is used by Gunicorn to find and run your application.
-# It imports the 'app' instance from your main application file (app.py).
-
-from app import app as application
-
-if __name__ == '__main__':
-    application.run()
+# ไฟล์นี้ทำหน้าที่เป็นจุดเริ่มต้นของแอปพลิเคชันสำหรับ Gunicorn
+# Gunicorn จะเรียกใช้ 'application' ที่ถูกกำหนดไว้ในไฟล์นี้
+import sys
+# แก้ไขจาก 'app' เป็น 'add' เพื่อให้เรียกใช้ไฟล์ add.py
+from add import app as application
